@@ -2,11 +2,15 @@ import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import type { User } from "@supabase/supabase-js";
 import { serverEnv } from "@/lib/env";
 
 /** Supabase client bound to the signed-in merchant's session cookie. Respects RLS. */
 export async function supabaseServer() {
+  // Session reads are per request. Supabase checks token expiry against the
+  // clock, which Cache Components forbids during prerender/prefetch validation.
+  await connection();
   const env = serverEnv();
   const cookieStore = await cookies();
   return createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, {
