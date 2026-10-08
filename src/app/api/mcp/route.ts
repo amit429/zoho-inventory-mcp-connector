@@ -55,4 +55,19 @@ const handler = withMcpAuth(
   { required: true },
 );
 
-export { handler as GET, handler as POST, handler as DELETE };
+/**
+ * Reports how long this function spent on the request (Server-Timing), and
+ * logs slow ones, so latency can be split between the connector and whatever
+ * sits in front of it (network, platform queueing, cold starts).
+ */
+async function timed(req: Request): Promise<Response> {
+  const started = performance.now();
+  const res = await handler(req);
+  const ms = performance.now() - started;
+  if (ms > 3_000) console.warn(`slow mcp request: ${Math.round(ms)}ms`);
+  const headers = new Headers(res.headers);
+  headers.set("server-timing", `handler;dur=${ms.toFixed(0)}`);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
+export { timed as GET, timed as POST, timed as DELETE };
