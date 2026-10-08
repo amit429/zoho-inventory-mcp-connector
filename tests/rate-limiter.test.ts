@@ -59,7 +59,7 @@ describe("SharedTokenBucket", () => {
 
   it("counts slow database round trips against the wait budget", async () => {
     // Regression: under contention the bucket reports tiny waits; when only the
-    // sleeps were summed, 300ms round trips let a call wait 24s instead of 8s.
+    // sleeps were summed, 300ms round trips let a call wait 24s instead of its budget.
     const clock = { now: 0 };
     const take = vi.fn<TakeTokenFn>(async () => {
       clock.now += 300;

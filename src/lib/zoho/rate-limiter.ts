@@ -38,7 +38,11 @@ export interface TokenBucketOptions {
 export const ZOHO_ORG_LIMIT: Omit<TokenBucketOptions, "sleep" | "now" | "onBackendError"> = {
   capacity: 10,
   refillPerSec: 1.5,
-  maxWaitMs: 8_000,
+  // Short on purpose. A waiting request still occupies a server slot, and in
+  // production load tests a burst of held requests delayed the requests queued
+  // behind them. Agents handle a fast RATE_LIMITED + retry_after_ms better
+  // than a silent 10s+ wait.
+  maxWaitMs: 4_000,
   minPollMs: 200,
 };
 

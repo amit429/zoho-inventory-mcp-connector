@@ -180,9 +180,14 @@ async function main() {
 
   if (process.argv.includes("--burst")) {
     await check("rate limit: 40 parallel calls are paced or shed, never hung", async () => {
-      // Expected: ~10 immediately (bucket capacity), more as tokens refill at
-      // 1.5/s, and the rest fail fast as RATE_LIMITED after ~8s instead of
-      // hanging. Zoho itself should never return a 429.
+      // Expected: ~10 succeed at once (bucket capacity), a few more as tokens
+      // refill at 1.5/s, and the rest fail fast as RATE_LIMITED once their 4s
+      // wait budget runs out. Zoho itself should never answer 429.
+      //
+      // End-to-end time also includes anything in front of the connector. In
+      // production, a burst landing on one warm instance was observed to queue
+      // part of it until earlier requests finished, so this checks for a hang
+      // (30s) rather than for the 4s in-tool budget, and reports the numbers.
       const timed = await Promise.all(
         Array.from({ length: 40 }, async () => {
           const started = performance.now();
@@ -191,10 +196,12 @@ async function main() {
         }),
       );
       const tally = timed.reduce<Record<string, number>>((acc, t) => ({ ...acc, [t.code]: (acc[t.code] ?? 0) + 1 }), {});
-      const slowest = Math.max(...timed.map((t) => t.ms));
+      const sorted = timed.map((t) => t.ms).sort((a, b) => a - b);
+      const p50 = sorted[Math.floor(sorted.length / 2)];
+      const slowest = sorted.at(-1)!;
       assert(Object.keys(tally).every((c) => c === "ok" || c === "RATE_LIMITED"), JSON.stringify(tally));
-      assert(slowest < 12_000, `slowest call took ${Math.round(slowest)}ms`);
-      return `${JSON.stringify(tally)}, slowest ${(slowest / 1000).toFixed(1)}s`;
+      assert(slowest < 30_000, `slowest call took ${Math.round(slowest)}ms`);
+      return `${JSON.stringify(tally)}, p50 ${(p50 / 1000).toFixed(1)}s, slowest ${(slowest / 1000).toFixed(1)}s`;
     });
   }
 
