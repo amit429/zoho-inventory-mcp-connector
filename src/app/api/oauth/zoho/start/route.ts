@@ -18,7 +18,10 @@ export async function GET(request: NextRequest) {
   const { accountsServer } = ZOHO_DATA_CENTERS[dc];
 
   const state = randomState();
-  const { error } = await supabaseAdmin()
+  const db = supabaseAdmin();
+  // Housekeeping: drop this user's abandoned (expired) attempts.
+  await db.from("oauth_states").delete().eq("user_id", user.id).lt("expires_at", new Date().toISOString());
+  const { error } = await db
     .from("oauth_states")
     .insert({ state, user_id: user.id, accounts_server: accountsServer });
   if (error) {

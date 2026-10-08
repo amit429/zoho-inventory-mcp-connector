@@ -186,7 +186,11 @@ docs/                     capabilities, tool spec, testing guide, architecture
 - **OAuth hardening:** one-time state bound to the signed-in user with a 10-minute expiry. The `accounts-server` reported by Zoho is checked against an allowlist before the client secret is sent there.
 - **PII minimization:** order tools return the shipping city, state and country but not the street address. The usage log stores the tool name, status and latency, never arguments.
 - **Disconnect** revokes the refresh token at Zoho and deletes the tokens, keys and logs.
-- **No secrets in the repo:** `.env*` is gitignored. Production secrets are Vercel "sensitive" variables.
+- **No secrets in the repo:** `.env*` is gitignored and the full git history has been scanned for keys and tokens. Production secrets are Vercel "sensitive" variables (write-only).
+- **Web hardening:** HSTS (Vercel), `X-Frame-Options: DENY` (the dashboard has one-click key and disconnect actions), `X-Content-Type-Options: nosniff`, `Referrer-Policy`. Server Actions re-check ownership on every call.
+- **Verified with the public key:** the browser-visible Supabase key can't read tokens, key hashes, OAuth state or buckets, can't write connections, and can't call the limiter or refresh-lock functions.
+- **Dependencies:** `npm audit --omit=dev` reports 0 vulnerabilities. `npm audit` flags a `braces`/`micromatch` advisory in the ESLint toolchain (`eslint-config-next`), which is dev-only and not deployed; npm's suggested fix is a downgrade to an incompatible major version.
+- **Recommended for production:** enable Supabase's leaked-password protection (HaveIBeenPwned check) under Auth settings.
 
 ---
 
