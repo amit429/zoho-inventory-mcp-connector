@@ -1,0 +1,423 @@
+{
+  "server": {
+    "name": "zoho-inventory-connector",
+    "version": "1.0.0",
+    "transport": "Streamable HTTP",
+    "endpoint": "/api/mcp"
+  },
+  "auth": {
+    "type": "bearer",
+    "header": "Authorization: Bearer zic_...",
+    "issuedBy": "connector dashboard, one key per agent"
+  },
+  "instructions": "Read-only access to one merchant's Zoho Inventory organization: products and stock, sales orders, customers and locations.\n- Use search_* tools when you have a name, SKU, order number or email; use list_* tools to browse with filters.\n- IDs from one tool (item_id, customer_id, salesorder_id) can be passed to get_* tools for full details.\n- stock_on_hand from list/search tools includes units already committed to open orders. Before telling a customer something is available, call get_item and use available_for_sale.\n- Results are paginated: if pagination.has_more is true, call again with page = pagination.next_page. Prefer narrowing filters over paging through everything; each page uses the merchant's Zoho API quota.\n- On an error, follow error.hint. Do not retry REAUTH_REQUIRED or FORBIDDEN_SCOPE.\n- This connector cannot create, edit or cancel anything in Zoho.",
+  "tools": [
+    {
+      "name": "get_connection_info",
+      "title": "Get connection info",
+      "description": "Returns the connected Zoho organization (name, currency, time zone) and the granted scopes. Call this first if you need the currency or time zone to interpret amounts and dates.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Get connection info",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_items",
+      "title": "List items",
+      "description": "Lists products with SKU, price, stock on hand and reorder level. stock_on_hand includes units committed to open orders; use get_item for available_for_sale. Use search_items instead if you have a name or SKU.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "status": {
+            "default": "active",
+            "description": "Filter by item status.",
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive",
+              "all"
+            ]
+          },
+          "page": {
+            "default": 1,
+            "description": "1-based page number.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "per_page": {
+            "default": 25,
+            "description": "Results per page (max 200).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        }
+      },
+      "annotations": {
+        "title": "List items",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "search_items",
+      "title": "Search items",
+      "description": "Finds products by name/description text or exact SKU and returns the same fields as list_items. To answer 'can I order X?', follow up with get_item for available_for_sale.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "query": {
+            "description": "Text to match against item name or description.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "sku": {
+            "description": "Exact SKU.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "status": {
+            "default": "active",
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive",
+              "all"
+            ]
+          },
+          "page": {
+            "default": 1,
+            "description": "1-based page number.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "per_page": {
+            "default": 25,
+            "description": "Results per page (max 200).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        }
+      },
+      "annotations": {
+        "title": "Search items",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_item",
+      "title": "Get item",
+      "description": "Full details for one product: stock_on_hand, committed_stock (reserved by open orders) and available_for_sale (what can be promised to a new customer), plus per-location stock for multi-location organizations.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "Zoho item_id."
+          }
+        },
+        "required": [
+          "item_id"
+        ]
+      },
+      "annotations": {
+        "title": "Get item",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_low_stock_items",
+      "title": "Get low-stock items",
+      "description": "Active items whose stock on hand is at or below their reorder level (Zoho's own reorder rule), most urgent first. Scans up to max_pages x 200 items; if `complete` is false, the catalog is larger than what was scanned.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "max_pages": {
+            "default": 3,
+            "description": "Pages of 200 items to scan. Each page is one Zoho API call.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          }
+        }
+      },
+      "annotations": {
+        "title": "Get low-stock items",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_sales_orders",
+      "title": "List sales orders",
+      "description": "Lists sales orders, newest first, with status, payment, invoicing and shipping state. Filter by status, customer_id and/or date range.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "status": {
+            "default": "all",
+            "type": "string",
+            "enum": [
+              "all",
+              "draft",
+              "confirmed",
+              "closed",
+              "void",
+              "onhold"
+            ]
+          },
+          "customer_id": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "Zoho customer_id."
+          },
+          "date_from": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Date in YYYY-MM-DD format, in the organization's time zone."
+          },
+          "date_to": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Date in YYYY-MM-DD format, in the organization's time zone."
+          },
+          "page": {
+            "default": 1,
+            "description": "1-based page number.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "per_page": {
+            "default": 25,
+            "description": "Results per page (max 200).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        }
+      },
+      "annotations": {
+        "title": "List sales orders",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "search_sales_orders",
+      "title": "Search sales orders",
+      "description": "Finds sales orders by order number, reference number or customer name. Use this to answer 'where is my order?' when the customer gives an order or reference number.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Order number (e.g. SO-00012), reference number, or customer name."
+          },
+          "page": {
+            "default": 1,
+            "description": "1-based page number.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "per_page": {
+            "default": 25,
+            "description": "Results per page (max 200).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "annotations": {
+        "title": "Search sales orders",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_sales_order",
+      "title": "Get sales order",
+      "description": "Full details for one sales order: line items with packed/shipped/invoiced quantities, packages with carrier and tracking number, invoices with balance due, and shipping city/state. Pass salesorder_id or salesorder_number.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "salesorder_id": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "Zoho salesorder_id."
+          },
+          "salesorder_number": {
+            "description": "Human-facing order number, e.g. SO-00012.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          }
+        }
+      },
+      "annotations": {
+        "title": "Get sales order",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_customers",
+      "title": "List customers",
+      "description": "Lists active customers with contact details and outstanding receivable amount.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "page": {
+            "default": 1,
+            "description": "1-based page number.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "per_page": {
+            "default": 25,
+            "description": "Results per page (max 200).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        }
+      },
+      "annotations": {
+        "title": "List customers",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "search_customers",
+      "title": "Search customers",
+      "description": "Finds customers by name, company, email or phone. Use the returned customer_id with list_sales_orders to see their orders.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "page": {
+            "default": 1,
+            "description": "1-based page number.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "per_page": {
+            "default": 25,
+            "description": "Results per page (max 200).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "annotations": {
+        "title": "Search customers",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_customer",
+      "title": "Get customer",
+      "description": "Details for one customer, including outstanding receivable amount.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "customer_id": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "Zoho customer_id."
+          }
+        },
+        "required": [
+          "customer_id"
+        ]
+      },
+      "annotations": {
+        "title": "Get customer",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_locations",
+      "title": "List locations",
+      "description": "Lists the organization's stock locations (warehouses, stores). Use with get_item to explain where stock is held.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "List locations",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ]
+}

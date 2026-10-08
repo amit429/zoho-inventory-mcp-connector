@@ -2,7 +2,7 @@ import Link from "next/link";
 
 const QUESTIONS = [
   "Where is order SO-00042, and what's the tracking number?",
-  "Is the indigo kurta in size M in stock, and in which warehouse?",
+  "Can a customer order 2 indigo kurtas in size M right now?",
   "Which products are below their reorder level?",
   "What does Priya Sharma still owe us?",
 ];
@@ -21,6 +21,9 @@ export default function Home() {
           <Link href="/dashboard" className="btn btn-primary">
             Connect Zoho Inventory
           </Link>
+          <a href="https://github.com/amit429/zoho-inventory-mcp-connector#readme" className="btn btn-secondary">
+            Docs and source
+          </a>
         </div>
       </header>
 
@@ -46,7 +49,7 @@ export default function Home() {
           </Step>
           <Step n={3} title="Point your agent at the endpoint">
             Add <span className="code">/api/mcp</span> with the key as a bearer token. The agent gets 12 tools for
-            items, stock, sales orders, customers and warehouses.
+            items, stock, sales orders, customers and locations.
           </Step>
         </ol>
       </section>
