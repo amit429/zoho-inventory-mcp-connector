@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ZohoInventoryClient } from "@/lib/zoho/client";
 import { refreshAccessToken, type ZohoOAuthConfig } from "@/lib/zoho/oauth";
 import { SharedTokenBucket, ZOHO_ORG_LIMIT } from "@/lib/zoho/rate-limiter";
-import { TokenProvider } from "@/lib/zoho/token-provider";
+import { TokenProvider, type CachedToken } from "@/lib/zoho/token-provider";
 import { SupabaseTokenRepository } from "./token-repo";
 
 export interface ConnectionRow {
@@ -32,18 +32,23 @@ export function tokenRepository() {
 }
 
 const rateLimiter = new SharedTokenBucket(
-  async (bucketKey, capacity, refillPerSec) => {
-    const { data, error } = await supabaseAdmin().rpc("take_rate_limit_token", {
-      p_bucket_key: bucketKey,
-      p_capacity: capacity,
-      p_refill_per_sec: refillPerSec,
-    });
+  async (bucketKey, capacity, refillPerSec, signal) => {
+    const { data, error } = await supabaseAdmin()
+      .rpc("take_rate_limit_token", {
+        p_bucket_key: bucketKey,
+        p_capacity: capacity,
+        p_refill_per_sec: refillPerSec,
+      })
+      .abortSignal(signal);
     if (error) throw error;
     const row = (Array.isArray(data) ? data[0] : data) as { allowed: boolean; retry_after_ms: number };
     return { allowed: row.allowed, retryAfterMs: row.retry_after_ms };
   },
   { ...ZOHO_ORG_LIMIT, onBackendError: (err) => console.error("rate limiter backend error, failing open", err) },
 );
+
+/** Decrypted access tokens for this server instance; see TokenProviderOptions.cache. */
+const accessTokenCache = new Map<string, CachedToken>();
 
 export async function loadConnection(connectionId: string): Promise<ConnectionRow | null> {
   const { data, error } = await supabaseAdmin().from("connections").select("*").eq("id", connectionId).maybeSingle();
@@ -54,8 +59,10 @@ export async function loadConnection(connectionId: string): Promise<ConnectionRo
 /** A fresh client per tool call, so requestCount reflects just that call. */
 export function zohoClientFor(connection: Pick<ConnectionRow, "id" | "accounts_server" | "zoho_org_id" | "api_domain">) {
   const oauth = zohoOAuthConfig();
-  const tokens = new TokenProvider(tokenRepository(), (refreshToken) =>
-    refreshAccessToken(oauth, connection.accounts_server, refreshToken),
+  const tokens = new TokenProvider(
+    tokenRepository(),
+    (refreshToken) => refreshAccessToken(oauth, connection.accounts_server, refreshToken),
+    { cache: accessTokenCache },
   );
   return new ZohoInventoryClient({
     connectionId: connection.id,

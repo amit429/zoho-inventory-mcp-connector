@@ -107,14 +107,15 @@ async function main() {
     assert(!isError, JSON.stringify(data));
     const rows = (data as unknown as Rows).results;
     assert(rows.some((r) => r.sku === item!.sku), `SKU ${item.sku} not found`);
-    return `${item.sku} → available ${rows[0].available_stock}`;
+    return `${item.sku} → stock on hand ${rows[0].stock_on_hand}`;
   });
 
-  await check("get_item with per-warehouse stock", async () => {
+  await check("get_item: committed vs available for sale", async () => {
     assert(item, "no item");
     const { data, isError } = await call("get_item", { item_id: item.item_id });
     assert(!isError, JSON.stringify(data));
-    return `${data.name}: ${(data.warehouses as unknown[]).length} warehouse(s)`;
+    assert(typeof data.available_for_sale === "number", "available_for_sale missing");
+    return `${data.sku}: on hand ${data.stock_on_hand}, committed ${data.committed_stock}, sellable ${data.available_for_sale}, ${(data.locations as unknown[]).length} location(s)`;
   });
 
   await check("get_low_stock_items", async () => {
@@ -157,11 +158,12 @@ async function main() {
     return `${detail.data.name}, outstanding ${detail.data.outstanding_receivable}`;
   });
 
-  await check("list_warehouses", async () => {
-    const { data, isError } = await call("list_warehouses");
-    // Single-warehouse orgs may not have warehouses enabled; that's a valid answer too.
-    if (isError) return `error ${data.error?.code} (warehouses not enabled?)`;
-    return `${(data as unknown as Rows).results.length} warehouse(s)`;
+  await check("list_locations", async () => {
+    const { data, isError } = await call("list_locations");
+    assert(!isError, JSON.stringify(data));
+    const rows = (data as unknown as Rows).results;
+    assert(rows.length > 0, "no locations");
+    return rows.map((r) => `${r.name}${r.is_primary ? " (primary)" : ""}`).join(", ");
   });
 
   await check("error: unknown item → NOT_FOUND with hint", async () => {
@@ -177,12 +179,22 @@ async function main() {
   });
 
   if (process.argv.includes("--burst")) {
-    await check("rate limit: 40 parallel calls, no Zoho 429s", async () => {
-      const burst = await Promise.all(Array.from({ length: 40 }, () => call("list_items", { per_page: 1 })));
-      const codes = burst.map((r) => (r.isError ? r.data.error?.code : "ok"));
-      const tally = codes.reduce<Record<string, number>>((acc, c) => ({ ...acc, [c!]: (acc[c!] ?? 0) + 1 }), {});
-      assert(!codes.includes("UPSTREAM_ERROR"), JSON.stringify(tally));
-      return JSON.stringify(tally);
+    await check("rate limit: 40 parallel calls are paced or shed, never hung", async () => {
+      // Expected: ~10 immediately (bucket capacity), more as tokens refill at
+      // 1.5/s, and the rest fail fast as RATE_LIMITED after ~8s instead of
+      // hanging. Zoho itself should never return a 429.
+      const timed = await Promise.all(
+        Array.from({ length: 40 }, async () => {
+          const started = performance.now();
+          const r = await call("list_items", { per_page: 1 });
+          return { code: r.isError ? r.data.error?.code ?? "?" : "ok", ms: performance.now() - started };
+        }),
+      );
+      const tally = timed.reduce<Record<string, number>>((acc, t) => ({ ...acc, [t.code]: (acc[t.code] ?? 0) + 1 }), {});
+      const slowest = Math.max(...timed.map((t) => t.ms));
+      assert(Object.keys(tally).every((c) => c === "ok" || c === "RATE_LIMITED"), JSON.stringify(tally));
+      assert(slowest < 12_000, `slowest call took ${Math.round(slowest)}ms`);
+      return `${JSON.stringify(tally)}, slowest ${(slowest / 1000).toFixed(1)}s`;
     });
   }
 

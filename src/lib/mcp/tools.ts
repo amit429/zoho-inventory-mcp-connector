@@ -36,9 +36,10 @@ export interface ToolDeps {
   recordCall: (record: ToolCallRecord) => void;
 }
 
-export const SERVER_INSTRUCTIONS = `Read-only access to one merchant's Zoho Inventory organization: products and stock, sales orders, customers and warehouses.
+export const SERVER_INSTRUCTIONS = `Read-only access to one merchant's Zoho Inventory organization: products and stock, sales orders, customers and locations.
 - Use search_* tools when you have a name, SKU, order number or email; use list_* tools to browse with filters.
 - IDs from one tool (item_id, customer_id, salesorder_id) can be passed to get_* tools for full details.
+- stock_on_hand from list/search tools includes units already committed to open orders. Before telling a customer something is available, call get_item and use available_for_sale.
 - Results are paginated: if pagination.has_more is true, call again with page = pagination.next_page. Prefer narrowing filters over paging through everything; each page uses the merchant's Zoho API quota.
 - On an error, follow error.hint. Do not retry REAUTH_REQUIRED or FORBIDDEN_SCOPE.
 - This connector cannot create, edit or cancel anything in Zoho.`;
@@ -124,7 +125,7 @@ export function registerInventoryTools(server: McpServer, deps: ToolDeps) {
       api_domain: connection.api_domain,
       scopes: connection.scopes,
       status: connection.status,
-      capabilities: "read-only: items, stock, sales orders, customers, warehouses",
+      capabilities: "read-only: items, stock, sales orders, customers, locations",
     }),
   );
 
@@ -137,7 +138,7 @@ export function registerInventoryTools(server: McpServer, deps: ToolDeps) {
     {
       title: "List items",
       description:
-        "Lists products with SKU, price, stock on hand, available stock and reorder level. Use search_items instead if you have a name or SKU.",
+        "Lists products with SKU, price, stock on hand and reorder level. stock_on_hand includes units committed to open orders; use get_item for available_for_sale. Use search_items instead if you have a name or SKU.",
       inputSchema: z.object({
         status: z.enum(["active", "inactive", "all"]).default("active").describe("Filter by item status."),
         page,
@@ -152,7 +153,7 @@ export function registerInventoryTools(server: McpServer, deps: ToolDeps) {
     {
       title: "Search items",
       description:
-        "Finds products by name/description text or exact SKU. Answers 'is X in stock?' and 'how many of SKU Y do we have?'. Returns the same fields as list_items.",
+        "Finds products by name/description text or exact SKU and returns the same fields as list_items. To answer 'can I order X?', follow up with get_item for available_for_sale.",
       inputSchema: z
         .object({
           query: z.string().trim().min(1).max(100).optional().describe("Text to match against item name or description."),
@@ -171,7 +172,7 @@ export function registerInventoryTools(server: McpServer, deps: ToolDeps) {
     "get_item",
     {
       title: "Get item",
-      description: "Full details for one product, including stock broken down by warehouse.",
+      description: "Full details for one product: stock_on_hand, committed_stock (reserved by open orders) and available_for_sale (what can be promised to a new customer), plus per-location stock for multi-location organizations.",
       inputSchema: z.object({ item_id: zohoId("item_id") }),
     },
     (args, { client }) => inventory.getItem(client, args.item_id),
@@ -182,7 +183,7 @@ export function registerInventoryTools(server: McpServer, deps: ToolDeps) {
     {
       title: "Get low-stock items",
       description:
-        "Active items whose available stock is at or below their reorder level, most urgent first. Scans up to max_pages x 200 items; if `complete` is false, the catalog is larger than what was scanned.",
+        "Active items whose stock on hand is at or below their reorder level (Zoho's own reorder rule), most urgent first. Scans up to max_pages x 200 items; if `complete` is false, the catalog is larger than what was scanned.",
       inputSchema: z.object({
         max_pages: z.number().int().min(1).max(5).default(3).describe("Pages of 200 items to scan. Each page is one Zoho API call."),
       }),
@@ -285,17 +286,18 @@ export function registerInventoryTools(server: McpServer, deps: ToolDeps) {
   );
 
   // -------------------------------------------------------------------------
-  // Warehouses
+  // Locations
   // -------------------------------------------------------------------------
 
   tool(
-    "list_warehouses",
+    "list_locations",
     {
-      title: "List warehouses",
-      description: "Lists the organization's warehouses/locations. Use with get_item to explain where stock is held.",
+      title: "List locations",
+      description:
+        "Lists the organization's stock locations (warehouses, stores). Use with get_item to explain where stock is held.",
       inputSchema: z.object({}),
     },
-    async (_args, { client }) => ({ results: await inventory.listWarehouses(client) }),
+    async (_args, { client }) => ({ results: await inventory.listLocations(client) }),
   );
 }
 

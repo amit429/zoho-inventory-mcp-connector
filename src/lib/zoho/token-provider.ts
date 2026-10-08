@@ -28,6 +28,18 @@ export interface TokenProviderOptions {
   pollIntervalMs?: number;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * In-process cache of decrypted access tokens, shared across calls in one
+   * server instance, so a warm instance skips the database read + decrypt on
+   * every tool call. The database stays the source of truth: a 401 from Zoho
+   * bypasses the cache and goes through the refresh path.
+   */
+  cache?: Map<string, CachedToken>;
+}
+
+export interface CachedToken {
+  accessToken: string;
+  expiresAt: Date;
 }
 
 /**
@@ -40,7 +52,8 @@ export interface TokenProviderOptions {
  * the new token appears.
  */
 export class TokenProvider {
-  private readonly opts: Required<TokenProviderOptions>;
+  private readonly opts: Required<Omit<TokenProviderOptions, "cache">>;
+  private readonly cache?: Map<string, CachedToken>;
 
   constructor(
     private readonly repo: TokenRepository,
@@ -55,6 +68,7 @@ export class TokenProvider {
       now: opts.now ?? Date.now,
       sleep: opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
     };
+    this.cache = opts.cache;
   }
 
   /**
@@ -64,17 +78,27 @@ export class TokenProvider {
   async getAccessToken(connectionId: string, rejectedToken?: string): Promise<string> {
     const { now, sleep, expirySkewMs, leaseSeconds, maxWaitMs, pollIntervalMs } = this.opts;
     const deadline = now() + maxWaitMs;
+    const usable = (t: CachedToken) =>
+      t.expiresAt.getTime() - now() > expirySkewMs && !(rejectedToken !== undefined && t.accessToken === rejectedToken);
+
+    const cached = this.cache?.get(connectionId);
+    if (cached && usable(cached)) return cached.accessToken;
 
     while (true) {
       const tokens = await this.repo.load(connectionId);
       if (!tokens) throw new ConnectorError("REAUTH_REQUIRED", "This connection has no Zoho tokens");
 
-      const stillValid = tokens.expiresAt.getTime() - now() > expirySkewMs;
-      const wasRejected = rejectedToken !== undefined && tokens.accessToken === rejectedToken;
-      if (stillValid && !wasRejected) return tokens.accessToken;
+      if (usable(tokens)) return this.remember(connectionId, tokens);
 
       if (await this.repo.tryAcquireRefreshLock(connectionId, leaseSeconds)) {
-        return this.refreshHoldingLock(connectionId, tokens.refreshToken);
+        // Double-check under the lock: another instance may have refreshed and
+        // released it between our read and our acquire.
+        const latest = await this.repo.load(connectionId);
+        if (latest && usable(latest)) {
+          await this.repo.releaseRefreshLock(connectionId);
+          return this.remember(connectionId, latest);
+        }
+        return this.refreshHoldingLock(connectionId, (latest ?? tokens).refreshToken);
       }
 
       if (now() >= deadline) {
@@ -84,12 +108,17 @@ export class TokenProvider {
     }
   }
 
+  private remember(connectionId: string, token: CachedToken): string {
+    this.cache?.set(connectionId, { accessToken: token.accessToken, expiresAt: token.expiresAt });
+    return token.accessToken;
+  }
+
   private async refreshHoldingLock(connectionId: string, refreshToken: string): Promise<string> {
     try {
       const grant = await this.refresh(refreshToken);
       const expiresAt = new Date(this.opts.now() + grant.expiresInSec * 1000);
       await this.repo.saveRefreshed(connectionId, grant.accessToken, expiresAt);
-      return grant.accessToken;
+      return this.remember(connectionId, { accessToken: grant.accessToken, expiresAt });
     } catch (err) {
       await this.repo.releaseRefreshLock(connectionId);
       if (err instanceof ConnectorError && err.code === "REAUTH_REQUIRED") {

@@ -1,7 +1,7 @@
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { after } from "next/server";
 import { verifyApiKey } from "@/lib/connector/api-keys";
-import { loadConnection, zohoClientFor } from "@/lib/connector/runtime";
+import { zohoClientFor, type ConnectionRow } from "@/lib/connector/runtime";
 import { logToolCall } from "@/lib/connector/usage";
 import { registerInventoryTools, SERVER_INSTRUCTIONS } from "@/lib/mcp/tools";
 import { ConnectorError } from "@/lib/zoho/errors";
@@ -10,8 +10,8 @@ const mcp = createMcpHandler(
   (server) =>
     registerInventoryTools(server, {
       async resolveContext(authExtra) {
-        const connectionId = typeof authExtra?.connectionId === "string" ? authExtra.connectionId : undefined;
-        const connection = connectionId ? await loadConnection(connectionId) : null;
+        // Loaded together with the API key in verifyApiKey: no extra query per call.
+        const connection = authExtra?.connection as ConnectionRow | undefined;
         if (!connection || connection.status === "revoked") {
           throw new ConnectorError("REAUTH_REQUIRED", "This connection no longer exists");
         }
@@ -49,7 +49,7 @@ const handler = withMcpAuth(
       token: bearerToken!,
       clientId: verified.apiKeyId,
       scopes: ["inventory:read"],
-      extra: { connectionId: verified.connectionId, apiKeyId: verified.apiKeyId },
+      extra: { connection: verified.connection, apiKeyId: verified.apiKeyId },
     };
   },
   { required: true },

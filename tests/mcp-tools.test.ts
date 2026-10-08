@@ -73,8 +73,8 @@ describe("MCP tools", () => {
       "get_sales_order",
       "list_customers",
       "list_items",
+      "list_locations",
       "list_sales_orders",
-      "list_warehouses",
       "search_customers",
       "search_items",
       "search_sales_orders",
@@ -90,7 +90,7 @@ describe("MCP tools", () => {
     const { callTool, calls, requests } = setup([
       ok({
         items: [
-          { item_id: "901", name: "Indigo Kurta - M", sku: "KUR-IND-M", status: "active", rate: 1499, stock_on_hand: 4, available_stock: 3, reorder_level: 5, unit: "pcs", some_noisy_field: "x" },
+          { item_id: "901", name: "Indigo Kurta - M", sku: "KUR-IND-M", status: "active", rate: 1499, stock_on_hand: 4, available_stock: 4, reorder_level: 5, unit: "pcs", some_noisy_field: "x" },
         ],
         page_context: { page: 1, per_page: 25, has_more_page: true },
       }),
@@ -108,12 +108,30 @@ describe("MCP tools", () => {
       unit: "pcs",
       selling_price: 1499,
       stock_on_hand: 4,
-      available_stock: 3,
       reorder_level: 5,
       below_reorder_level: true,
     });
     expect(body.pagination).toEqual({ page: 1, per_page: 25, has_more: true, next_page: 2 });
     expect(calls).toMatchObject([{ tool: "search_items", status: "ok", zohoRequests: 1, apiKeyId: "key-1" }]);
+  });
+
+  it("get_item separates committed stock from what can actually be sold, per location", async () => {
+    // Shapes taken from a live Zoho Inventory (India) organization.
+    const { callTool } = setup([
+      ok({
+        item: {
+          item_id: "901", name: "Indigo Kurta - M", sku: "KUR-IND-M", stock_on_hand: 3, available_stock: 3,
+          committed_stock: 2, actual_committed_stock: 2, available_for_sale_stock: 1, actual_available_for_sale_stock: 1,
+          reorder_level: 5,
+          locations: [{ location_id: "42", location_name: "Head Office", location_stock_on_hand: 3, location_actual_available_for_sale_stock: 1 }],
+        },
+      }),
+    ]);
+
+    const { body } = await callTool("get_item", { item_id: "901" });
+
+    expect(body).toMatchObject({ stock_on_hand: 3, committed_stock: 2, available_for_sale: 1, below_reorder_level: true });
+    expect(body.locations).toEqual([{ location_id: "42", location_name: "Head Office", stock_on_hand: 3, available_for_sale: 1 }]);
   });
 
   it("get_sales_order by number resolves the number, then returns tracking and line items", async () => {
@@ -185,8 +203,8 @@ describe("MCP tools", () => {
     const page = (items: object[], hasMore: boolean) =>
       ok({ items, page_context: { page: 1, per_page: 200, has_more_page: hasMore } });
     const { callTool } = setup([
-      page([{ item_id: "1", name: "A", available_stock: 4, reorder_level: 5 }, { item_id: "2", name: "B", available_stock: 50, reorder_level: 5 }], true),
-      page([{ item_id: "3", name: "C", available_stock: 0, reorder_level: 10 }], false),
+      page([{ item_id: "1", name: "A", stock_on_hand: 4, reorder_level: 5 }, { item_id: "2", name: "B", stock_on_hand: 50, reorder_level: 5 }], true),
+      page([{ item_id: "3", name: "C", stock_on_hand: 0, reorder_level: 10 }], false),
     ]);
 
     const { body } = await callTool("get_low_stock_items", { max_pages: 2 });

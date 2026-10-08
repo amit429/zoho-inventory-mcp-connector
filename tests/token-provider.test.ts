@@ -101,6 +101,23 @@ describe("TokenProvider", () => {
     await expect(provider.getAccessToken("c")).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
   });
 
+  it("serves warm calls from the in-process cache, but a Zoho 401 bypasses it", async () => {
+    const repo = new MemoryRepo({ accessToken: "a1", refreshToken: "r", expiresAt: inMinutes(30) });
+    const load = vi.spyOn(repo, "load");
+    const refresh = vi.fn().mockResolvedValue({ accessToken: "a2", expiresInSec: 3600 });
+    const cache = new Map();
+    const provider = new TokenProvider(repo, refresh, { cache });
+
+    await provider.getAccessToken("c");
+    await provider.getAccessToken("c");
+    await new TokenProvider(repo, refresh, { cache }).getAccessToken("c"); // another call, same instance
+    expect(load).toHaveBeenCalledTimes(1);
+
+    await expect(provider.getAccessToken("c", "a1")).resolves.toBe("a2");
+    await expect(provider.getAccessToken("c")).resolves.toBe("a2"); // cache now holds the refreshed token
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("requires re-auth when the connection has no tokens", async () => {
     const provider = new TokenProvider(new MemoryRepo(null), vi.fn());
     await expect(provider.getAccessToken("c")).rejects.toMatchObject({ code: "REAUTH_REQUIRED" });

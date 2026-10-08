@@ -80,9 +80,13 @@ export interface ItemSummary {
   status: string | null;
   unit: string | null;
   selling_price: number | null;
+  /**
+   * Physical stock, INCLUDING units already committed to open sales orders.
+   * Zoho's list endpoint doesn't return committed stock; get_item does.
+   */
   stock_on_hand: number | null;
-  available_stock: number | null;
   reorder_level: number | null;
+  /** stock_on_hand <= reorder_level, the same rule Zoho uses for reorder alerts. */
   below_reorder_level: boolean;
 }
 
@@ -91,16 +95,21 @@ export interface ItemDetail extends ItemSummary {
   purchase_price: number | null;
   upc: string | null;
   ean: string | null;
-  warehouses: {
-    warehouse_id: string;
-    warehouse_name: string | null;
+  /** Units reserved by confirmed sales orders that haven't shipped yet. */
+  committed_stock: number | null;
+  /** What can actually be promised to a new customer: stock_on_hand - committed_stock. */
+  available_for_sale: number | null;
+  /** Per-location stock. Empty when the organization has a single location. */
+  locations: {
+    location_id: string;
+    location_name: string | null;
     stock_on_hand: number | null;
-    available_stock: number | null;
+    available_for_sale: number | null;
   }[];
 }
 
 function mapItem(i: Raw): ItemSummary {
-  const stock = num(i.available_stock) ?? num(i.stock_on_hand);
+  const stock = num(i.stock_on_hand);
   const reorder = num(i.reorder_level);
   return {
     item_id: String(i.item_id),
@@ -109,11 +118,30 @@ function mapItem(i: Raw): ItemSummary {
     status: str(i.status),
     unit: str(i.unit),
     selling_price: num(i.rate),
-    stock_on_hand: num(i.stock_on_hand),
-    available_stock: num(i.available_stock),
+    stock_on_hand: stock,
     reorder_level: reorder,
     below_reorder_level: reorder !== null && reorder > 0 && stock !== null && stock <= reorder,
   };
+}
+
+/**
+ * Zoho moved from "warehouses" to "locations"; older organizations still
+ * return the warehouse shape, so accept either.
+ */
+function mapItemLocations(i: Raw): ItemDetail["locations"] {
+  const locations = arr(i.locations).map((l) => ({
+    location_id: String(l.location_id),
+    location_name: str(l.location_name),
+    stock_on_hand: num(l.location_stock_on_hand),
+    available_for_sale: num(l.location_actual_available_for_sale_stock) ?? num(l.location_available_for_sale_stock),
+  }));
+  if (locations.length) return locations;
+  return arr(i.warehouses).map((w) => ({
+    location_id: String(w.warehouse_id),
+    location_name: str(w.warehouse_name),
+    stock_on_hand: num(w.warehouse_stock_on_hand),
+    available_for_sale: num(w.warehouse_actual_available_for_sale_stock) ?? num(w.warehouse_available_for_sale_stock),
+  }));
 }
 
 export type ItemStatusFilter = "active" | "inactive" | "all";
@@ -148,12 +176,9 @@ export async function getItem(client: ZohoInventoryClient, itemId: string): Prom
     purchase_price: num(i.purchase_rate),
     upc: str(i.upc),
     ean: str(i.ean),
-    warehouses: arr(i.warehouses).map((w) => ({
-      warehouse_id: String(w.warehouse_id),
-      warehouse_name: str(w.warehouse_name),
-      stock_on_hand: num(w.warehouse_stock_on_hand),
-      available_stock: num(w.warehouse_available_stock),
-    })),
+    committed_stock: num(i.actual_committed_stock) ?? num(i.committed_stock),
+    available_for_sale: num(i.actual_available_for_sale_stock) ?? num(i.available_for_sale_stock),
+    locations: mapItemLocations(i),
   };
 }
 
@@ -178,7 +203,7 @@ export async function findLowStockItems(
     page++;
   }
   // Most urgent first: furthest below its reorder level.
-  const headroom = (i: ItemSummary) => (i.available_stock ?? i.stock_on_hand ?? 0) - (i.reorder_level ?? 0);
+  const headroom = (i: ItemSummary) => (i.stock_on_hand ?? 0) - (i.reorder_level ?? 0);
   low.sort((a, b) => headroom(a) - headroom(b));
   return { results: low, scanned_items: scanned, complete: !hasMore };
 }
@@ -377,26 +402,33 @@ export async function getCustomer(client: ZohoInventoryClient, customerId: strin
 }
 
 // ---------------------------------------------------------------------------
-// Warehouses
+// Locations
 // ---------------------------------------------------------------------------
 
-export interface Warehouse {
-  warehouse_id: string;
+export interface Location {
+  location_id: string;
   name: string;
-  status: string | null;
+  type: string | null;
   is_primary: boolean;
+  is_active: boolean;
   city: string | null;
   state: string | null;
+  country: string | null;
 }
 
-export async function listWarehouses(client: ZohoInventoryClient): Promise<Warehouse[]> {
-  const res = await client.get<{ warehouses?: Raw[] }>("/settings/warehouses");
-  return arr(res.warehouses).map((w) => ({
-    warehouse_id: String(w.warehouse_id),
-    name: str(w.warehouse_name) ?? "",
-    status: str(w.status),
-    is_primary: w.is_primary === true,
-    city: str(w.city),
-    state: str(w.state),
-  }));
+export async function listLocations(client: ZohoInventoryClient): Promise<Location[]> {
+  const res = await client.get<{ locations?: Raw[] }>("/locations");
+  return arr(res.locations).map((l) => {
+    const address = (l.address ?? {}) as Raw;
+    return {
+      location_id: String(l.location_id),
+      name: str(l.location_name) ?? "",
+      type: str(l.type),
+      is_primary: l.is_primary_location === true,
+      is_active: l.is_location_active !== false,
+      city: str(address.city),
+      state: str(address.state),
+      country: str(address.country),
+    };
+  });
 }
