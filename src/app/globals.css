@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #fafaf9;
+  --surface: #ffffff;
+  --fg: #1c1917;
+  --muted: #78716c;
+  --border: #e7e5e4;
+  --accent: #2563eb;
+  --accent-fg: #ffffff;
+  --ok: #15803d;
+  --ok-bg: #f0fdf4;
+  --warn: #b45309;
+  --warn-bg: #fffbeb;
+  --err: #b91c1c;
+  --err-bg: #fef2f2;
+  --code-bg: #f5f5f4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c0a09;
+    --surface: #1c1917;
+    --fg: #f5f5f4;
+    --muted: #a8a29e;
+    --border: #292524;
+    --accent: #3b82f6;
+    --ok: #4ade80;
+    --ok-bg: #052e16;
+    --warn: #fbbf24;
+    --warn-bg: #2b1d05;
+    --err: #f87171;
+    --err-bg: #2c0b0b;
+    --code-bg: #292524;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-border bg-surface p-5;
+  }
+  .input {
+    @apply rounded-lg border border-border bg-surface px-3 py-2 text-sm font-normal outline-none focus:border-accent;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-60;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-fg);
+    @apply hover:opacity-90;
+  }
+  .btn-secondary {
+    @apply border border-border bg-surface hover:bg-bg;
+  }
+  .btn-danger {
+    color: var(--err);
+    @apply border border-border bg-surface hover:bg-bg;
+  }
+  .notice {
+    @apply rounded-lg px-3 py-2 text-sm;
+  }
+  .notice-error {
+    color: var(--err);
+    background: var(--err-bg);
+  }
+  .notice-ok {
+    color: var(--ok);
+    background: var(--ok-bg);
+  }
+  .notice-warn {
+    color: var(--warn);
+    background: var(--warn-bg);
+  }
+  .code {
+    background: var(--code-bg);
+    @apply rounded-md px-1.5 py-0.5 font-mono text-[0.85em];
+  }
+  .label {
+    @apply text-xs font-medium uppercase tracking-wide text-muted;
+  }
+}
