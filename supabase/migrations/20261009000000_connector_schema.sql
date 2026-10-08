@@ -211,3 +211,5 @@ $$;
 -- These functions mutate server-only tables; only the server may call them.
 revoke execute on function public.take_rate_limit_token(text, integer, double precision) from public, anon, authenticated;
 revoke execute on function public.acquire_refresh_lock(uuid, integer) from public, anon, authenticated;
+grant execute on function public.take_rate_limit_token(text, integer, double precision) to service_role;
+grant execute on function public.acquire_refresh_lock(uuid, integer) to service_role;
