@@ -10,7 +10,8 @@
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit",
     "seed": "tsx scripts/seed-zoho.ts",
-    "test:connector": "tsx scripts/test-connector.ts"
+    "test:connector": "tsx scripts/test-connector.ts",
+    "check:setup": "tsx scripts/check-setup.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.3.1",

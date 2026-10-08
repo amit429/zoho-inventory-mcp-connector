@@ -18,7 +18,9 @@
  * Optional: ZOHO_ACCOUNTS_SERVER (default https://accounts.zoho.in), ZOHO_ORG_ID
  * (default: the account's default organization).
  */
-import "dotenv/config";
+import { config } from "dotenv";
+
+config({ path: [".env.local", ".env"], quiet: true });
 
 const ACCOUNTS = process.env.ZOHO_ACCOUNTS_SERVER ?? "https://accounts.zoho.in";
 

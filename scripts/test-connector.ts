@@ -7,7 +7,9 @@
  *
  * Exits non-zero if any check fails.
  */
-import "dotenv/config";
+import { config } from "dotenv";
+
+config({ path: [".env.local", ".env"], quiet: true });
 
 const url = process.env.MCP_URL;
 const key = process.env.MCP_API_KEY;
